@@ -1,6 +1,6 @@
 # ESP32 Rain Sensor Dashboard
 
-Real-time rain sensor monitoring with an ESP32, I2C LCD, and a standalone web dashboard.
+Real-time rain sensor monitoring with an ESP32, I2C LCD, two LEDs, push button, and a standalone web dashboard.
 
 ---
 
@@ -12,20 +12,35 @@ Real-time rain sensor monitoring with an ESP32, I2C LCD, and a standalone web da
 | ESP32 DevKit | Any 38-pin variant |
 | Rain sensor module | With both AO (analog) and DO (digital) outputs |
 | I2C LCD 16x2 | Address `0x27` (most common) |
+| Red LED | 5mm or SMD, any standard LED |
+| Blue LED | 5mm or SMD, any standard LED |
+| 2x 220 Ohm resistors | Current limiting for LEDs |
+| 4-pin micro push switch | Momentary, normally open |
 
 ### Pin Wiring
-| Signal | ESP32 Pin | Notes |
-|--------|-----------|-------|
+| Component | ESP32 Pin | Notes |
+|-----------|-----------|-------|
+| Rain DO | GPIO 34 | Digital rain threshold (input-only pin) |
+| Rain AO | GPIO 35 | Analog rain voltage (input-only pin) |
 | LCD SDA | GPIO 21 | I2C data |
 | LCD SCL | GPIO 22 | I2C clock |
-| LCD VCC | 5 V | |
-| LCD GND | GND | |
-| Sensor DO | GPIO 34 | Digital threshold output |
-| Sensor AO | GPIO 35 | Analog voltage output |
-| Sensor VCC | 3.3 V or 5 V | Check module spec |
-| Sensor GND | GND | |
+| Red LED | GPIO 25 | Anode → 220 Ohm → GPIO 25 · Cathode → GND |
+| Blue LED | GPIO 26 | Anode → 220 Ohm → GPIO 26 · Cathode → GND |
+| Push Button | GPIO 27 | One pair to GPIO 27, other pair to GND · Uses INPUT_PULLUP |
 
 > GPIO 34 and 35 are input-only on ESP32 — correct for sensor use.
+
+### LED Wiring Detail
+```
+GPIO 25 ──[220Ω]──┤RED LED├── GND
+GPIO 26 ──[220Ω]──┤BLUE LED├── GND
+```
+
+### Button Wiring Detail
+```
+GPIO 27 ──┤SW pin 1├──┤SW pin 2├── GND
+(INPUT_PULLUP pulls GPIO 27 HIGH when idle; press pulls it LOW)
+```
 
 ---
 
@@ -62,17 +77,46 @@ pio run --target upload
 pio device monitor --baud 115200
 ```
 
-### HTTP API
+---
+
+## Behavior
+
+### Modes
+The push button (GPIO 27) toggles between two modes:
+
+| Mode | LED Behavior | Dashboard Toggles |
+|------|-------------|-------------------|
+| **Auto** | LEDs follow sensor logic (see below) | Disabled (greyed out) |
+| **Manual** | LEDs controlled from dashboard | Enabled |
+
+The LCD briefly shows `Mode: Auto` or `Mode: Manual` for 2 seconds when the button is pressed.
+
+### Auto Mode LED Logic
+| Condition | Red LED | Blue LED |
+|-----------|---------|----------|
+| Rain detected (`rain_percent >= 40` OR `digital_val == 0`) | ON | — |
+| No rain | OFF | — |
+| WiFi connected | — | ON |
+| WiFi disconnected / connecting | — | OFF / blink |
+
+### Button Debounce
+50 ms hardware debounce prevents false triggers from contact bounce.
+
+---
+
+## HTTP API
 
 Once connected to WiFi the ESP32 exposes:
 
 | Endpoint | Method | Response |
 |----------|--------|----------|
 | `GET /` | HTTP 302 | Redirects to `/data` |
-| `GET /data` | JSON | See below |
+| `GET /data` | JSON | Sensor readings + LED state + mode |
+| `GET /led?red=0|1&blue=0|1` | JSON | Set LED state (Manual Mode only) |
 | `OPTIONS /data` | 204 | CORS preflight |
+| `OPTIONS /led` | 204 | CORS preflight |
 
-**`GET /data` response:**
+### `GET /data` response
 ```json
 {
   "ip":           "192.168.1.42",
@@ -80,7 +124,10 @@ Once connected to WiFi the ESP32 exposes:
   "analog_val":   2200,
   "digital_val":  0,
   "status":       "Moderate",
-  "uptime":       12345
+  "uptime":       12345,
+  "led_red":      true,
+  "led_blue":     false,
+  "mode":         "auto"
 }
 ```
 
@@ -91,8 +138,21 @@ Once connected to WiFi the ESP32 exposes:
 | `digital_val` | DO pin: `0` = rain detected, `1` = dry |
 | `status` | `Dry` / `Light Rain` / `Moderate` / `Heavy Rain!` |
 | `uptime` | Seconds since boot |
+| `led_red` | Current red LED state (`true` = ON) |
+| `led_blue` | Current blue LED state (`true` = ON) |
+| `mode` | `"auto"` or `"manual"` |
 
-All responses include `Access-Control-Allow-Origin: *` so the dashboard can fetch from any origin.
+### `GET /led` response
+```json
+{
+  "led_red":  true,
+  "led_blue": false,
+  "mode":     "manual",
+  "accepted": true
+}
+```
+
+`accepted` is `false` when called while in Auto Mode (command is ignored, current state is returned).
 
 ### Status Thresholds
 | Rain % | Status |
@@ -101,6 +161,8 @@ All responses include `Access-Control-Allow-Origin: *` so the dashboard can fetc
 | 10–39 | Light Rain |
 | 40–69 | Moderate |
 | >= 70 | Heavy Rain! |
+
+All responses include `Access-Control-Allow-Origin: *` so the dashboard can fetch from any origin.
 
 ---
 
@@ -129,9 +191,14 @@ python3 -m http.server 8080
 4. Type the ESP32 IP into the **IP Address** field and click **Connect**.
 5. The IP is saved to `localStorage` — no need to re-enter it next time.
 
-### Features
+### Dashboard Features
 - Animated circular gauge showing rain percentage
 - Color-coded status badge (green / yellow / orange / red)
+- **Mode badge**: shows "Auto" (green) or "Manual" (orange) — updates every poll
+- **LED toggles**: iOS-style toggle switches for Red and Blue LEDs
+  - Disabled with tooltip in Auto Mode
+  - Enabled in Manual Mode — sends `GET /led` to ESP32
+  - Visual state stays in sync with `/data` poll every second
 - Raw analog and digital readings
 - ESP32 uptime
 - Line chart of last 60 readings (Chart.js via CDN)
@@ -168,3 +235,6 @@ ESP-32-Rain/
 | WiFi never connects | Confirm SSID/password, 2.4 GHz only (ESP32 has no 5 GHz) |
 | Dashboard cannot reach ESP32 | Same network? Try pinging the IP from your machine |
 | CORS error in browser | Re-flash with updated firmware; check CORS headers in browser DevTools |
+| LED toggles always greyed out | Board is in Auto Mode — press the physical button to switch to Manual |
+| LED command returns `accepted: false` | Board is in Auto Mode — toggles are intentionally disabled |
+| Button not responding | Check wiring: one pin pair to GPIO 27, other pair to GND |

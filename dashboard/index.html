@@ -86,6 +86,7 @@
       gap: 10px;
       margin-bottom: 24px;
       font-size: 0.82rem;
+      flex-wrap: wrap;
     }
     .dot {
       width: 10px; height: 10px;
@@ -96,6 +97,28 @@
     .dot.connected    { background: var(--dry); box-shadow: 0 0 6px var(--dry); }
     .dot.disconnected { background: var(--heavy); }
     #conn-label { color: var(--muted); }
+
+    /* ── Mode badge ───────────────────────────────────────────────────────── */
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      transition: background 0.3s, color 0.3s, border-color 0.3s;
+    }
+    .mode-badge.auto   { background: #1a3d24; color: var(--dry);   border-color: #2a6038; }
+    .mode-badge.manual { background: #3d2209; color: var(--moderate); border-color: #6b3a10; }
+    .mode-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
 
     /* ── Grid ─────────────────────────────────────────────────────────────── */
     .grid {
@@ -143,7 +166,7 @@
     .gauge .track  { stroke: var(--border); }
     .gauge .fill   {
       stroke: var(--dry);
-      stroke-dasharray: 339.292;        /* 2π × r(54) */
+      stroke-dasharray: 339.292;        /* 2pi x r(54) */
       stroke-dashoffset: 339.292;
       transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease;
     }
@@ -191,6 +214,104 @@
     .stat-row:last-child { border-bottom: none; }
     .stat-key   { color: var(--muted); }
     .stat-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    /* ── LED Control card ─────────────────────────────────────────────────── */
+    .led-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .led-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .led-card-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .led-hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .led-controls {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    /* ── Toggle switch (iOS-style) ────────────────────────────────────────── */
+    .toggle-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .toggle-label {
+      font-size: 0.9rem;
+      font-weight: 600;
+      min-width: 80px;
+    }
+    .toggle-label.red  { color: #f85149; }
+    .toggle-label.blue { color: #58a6ff; }
+    .toggle-label.disabled { color: var(--muted); }
+
+    /* The switch track */
+    .toggle-switch {
+      position: relative;
+      width: 48px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: var(--border);
+      cursor: pointer;
+      transition: background 0.25s;
+    }
+    .toggle-track::before {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: white;
+      top: 3px;
+      left: 3px;
+      transition: transform 0.25s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    /* Checked states */
+    .toggle-switch input:checked + .toggle-track.red-track  { background: #b91c1c; }
+    .toggle-switch input:checked + .toggle-track.blue-track { background: #1d4ed8; }
+    .toggle-switch input:checked + .toggle-track::before {
+      transform: translateX(22px);
+    }
+    /* Disabled state */
+    .toggle-switch input:disabled + .toggle-track {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .toggle-switch input:disabled ~ * {
+      cursor: not-allowed;
+    }
 
     /* ── Chart card (full width) ──────────────────────────────────────────── */
     .chart-card {
@@ -248,10 +369,14 @@
     <span class="chip" id="current-ip-chip">—</span>
   </div>
 
-  <!-- Connection status -->
+  <!-- Connection status + mode badge -->
   <div class="status-strip">
     <div class="dot disconnected" id="conn-dot"></div>
     <span id="conn-label">Not connected</span>
+    <span class="mode-badge auto" id="mode-badge">
+      <span class="mode-dot"></span>
+      <span id="mode-text">Auto</span>
+    </span>
   </div>
 
   <!-- Error box -->
@@ -315,6 +440,35 @@
 
   </div>
 
+  <!-- LED Control card -->
+  <div class="led-card">
+    <div class="led-card-header">
+      <span class="led-card-title">LED Control / ควบคุม LED</span>
+      <span class="led-hint" id="led-hint">กดปุ่มบนบอร์ดเพื่อเปลี่ยน Mode</span>
+    </div>
+    <div class="led-controls">
+
+      <!-- Red LED toggle -->
+      <div class="toggle-item">
+        <label class="toggle-switch" title="" id="red-toggle-label">
+          <input type="checkbox" id="toggle-red" onchange="onToggleRed(this)" disabled />
+          <span class="toggle-track red-track"></span>
+        </label>
+        <span class="toggle-label red" id="label-red">ไฟแดง</span>
+      </div>
+
+      <!-- Blue LED toggle -->
+      <div class="toggle-item">
+        <label class="toggle-switch" title="" id="blue-toggle-label">
+          <input type="checkbox" id="toggle-blue" onchange="onToggleBlue(this)" disabled />
+          <span class="toggle-track blue-track"></span>
+        </label>
+        <span class="toggle-label blue" id="label-blue">ไฟน้ำเงิน</span>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Line chart -->
   <div class="chart-card">
     <div class="card-title" style="margin-bottom:16px;">
@@ -334,10 +488,14 @@ const MAX_POINTS = 60;
 const CIRCUMF    = 2 * Math.PI * 54;   // SVG circle r=54
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let currentIP     = localStorage.getItem('esp32-ip') || '';
-let pollTimer     = null;
-let chartLabels   = [];
-let chartData     = [];
+let currentIP   = localStorage.getItem('esp32-ip') || '';
+let pollTimer   = null;
+let chartLabels = [];
+let chartData   = [];
+let currentMode = 'auto';   // 'auto' | 'manual'
+let ledRedState  = false;
+let ledBlueState = false;
+let isSendingLed = false;   // prevent overlapping /led requests
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const ipInput       = document.getElementById('ip-input');
@@ -355,6 +513,13 @@ const statDigital   = document.getElementById('stat-digital');
 const statIP        = document.getElementById('stat-ip');
 const statUptime    = document.getElementById('stat-uptime');
 const lastUpdated   = document.getElementById('last-updated');
+const modeBadge     = document.getElementById('mode-badge');
+const modeText      = document.getElementById('mode-text');
+const ledHint       = document.getElementById('led-hint');
+const toggleRed     = document.getElementById('toggle-red');
+const toggleBlue    = document.getElementById('toggle-blue');
+const labelRed      = document.getElementById('label-red');
+const labelBlue     = document.getElementById('label-blue');
 
 // ── Chart setup ──────────────────────────────────────────────────────────────
 const ctx = document.getElementById('rain-chart').getContext('2d');
@@ -378,9 +543,7 @@ const rainChart = new Chart(ctx, {
     responsive: true,
     maintainAspectRatio: true,
     scales: {
-      x: {
-        display: false,
-      },
+      x: { display: false },
       y: {
         min: 0, max: 100,
         grid:  { color: '#30363d' },
@@ -432,10 +595,77 @@ function setBadge(status) {
   statusBadge.textContent = status;
   statusBadge.className   = 'badge';
   const s = status.toLowerCase();
-  if      (s.includes('dry'))    statusBadge.classList.add('dry');
-  else if (s.includes('light'))  statusBadge.classList.add('light');
+  if      (s.includes('dry'))      statusBadge.classList.add('dry');
+  else if (s.includes('light'))    statusBadge.classList.add('light');
   else if (s.includes('moderate')) statusBadge.classList.add('moderate');
-  else if (s.includes('heavy'))  statusBadge.classList.add('heavy');
+  else if (s.includes('heavy'))    statusBadge.classList.add('heavy');
+}
+
+// ── Mode update ───────────────────────────────────────────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+  const isAuto = mode === 'auto';
+
+  modeBadge.className = 'mode-badge ' + (isAuto ? 'auto' : 'manual');
+  modeText.textContent = isAuto ? 'Auto' : 'Manual';
+
+  // Toggle enabled/disabled + tooltips
+  const disabledTitle = 'กดปุ่มบนบอร์ดเพื่อเปิด Manual Mode';
+  toggleRed.disabled  = isAuto;
+  toggleBlue.disabled = isAuto;
+
+  document.getElementById('red-toggle-label').title  = isAuto ? disabledTitle : '';
+  document.getElementById('blue-toggle-label').title = isAuto ? disabledTitle : '';
+
+  labelRed.className  = 'toggle-label red'  + (isAuto ? ' disabled' : '');
+  labelBlue.className = 'toggle-label blue' + (isAuto ? ' disabled' : '');
+
+  ledHint.textContent = isAuto
+    ? 'Auto Mode — กดปุ่มบนบอร์ดเพื่อเปลี่ยนเป็น Manual'
+    : 'Manual Mode — กดปุ่มบนบอร์ดเพื่อกลับ Auto';
+}
+
+// ── LED state sync (from /data poll) ─────────────────────────────────────────
+function syncLedToggles(red, blue) {
+  // Only update visuals when not actively being toggled by user
+  if (!isSendingLed) {
+    toggleRed.checked  = red;
+    toggleBlue.checked = blue;
+  }
+  ledRedState  = red;
+  ledBlueState = blue;
+}
+
+// ── Send LED state to ESP32 ───────────────────────────────────────────────────
+async function sendLed(red, blue) {
+  if (!currentIP || currentMode === 'auto') return;
+  isSendingLed = true;
+  const url = `http://${currentIP}/led?red=${red ? 1 : 0}&blue=${blue ? 1 : 0}`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    const d   = await res.json();
+    // Sync to confirmed state from ESP32
+    toggleRed.checked  = d.led_red;
+    toggleBlue.checked = d.led_blue;
+    ledRedState  = d.led_red;
+    ledBlueState = d.led_blue;
+  } catch (e) {
+    console.warn('LED command failed:', e.message);
+    // Revert toggle visuals to last known state
+    toggleRed.checked  = ledRedState;
+    toggleBlue.checked = ledBlueState;
+  } finally {
+    isSendingLed = false;
+  }
+}
+
+// ── Toggle handlers ───────────────────────────────────────────────────────────
+function onToggleRed(el) {
+  sendLed(el.checked, toggleBlue.checked);
+}
+
+function onToggleBlue(el) {
+  sendLed(toggleRed.checked, el.checked);
 }
 
 // ── Uptime formatter ─────────────────────────────────────────────────────────
@@ -472,9 +702,9 @@ function pushChartPoint(pct) {
     chartLabels.shift();
     chartData.shift();
   }
-  rainChart.data.labels   = [...chartLabels];
-  rainChart.data.datasets[0].data = [...chartData];
-  rainChart.update('none');   // skip animation for speed
+  rainChart.data.labels              = [...chartLabels];
+  rainChart.data.datasets[0].data    = [...chartData];
+  rainChart.update('none');
 }
 
 // ── Fetch + render ────────────────────────────────────────────────────────────
@@ -497,6 +727,12 @@ async function poll() {
     lastUpdated.textContent = 'Last updated: ' + new Date().toLocaleTimeString('th-TH', { hour12: false });
     pushChartPoint(d.rain_percent);
 
+    // Sync mode + LEDs
+    if (d.mode !== undefined) setMode(d.mode);
+    if (d.led_red !== undefined && d.led_blue !== undefined) {
+      syncLedToggles(d.led_red, d.led_blue);
+    }
+
   } catch (err) {
     setConnected(false, err.message || 'Fetch failed');
     lastUpdated.textContent = 'Last updated: —  (connection lost)';
@@ -506,7 +742,7 @@ async function poll() {
 // ── Polling control ──────────────────────────────────────────────────────────
 function restartPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  poll();   // immediate first call
+  poll();
   pollTimer = setInterval(poll, POLL_MS);
 }
 
@@ -515,6 +751,7 @@ ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveIP(); });
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 loadSavedIP();
+setMode('auto');   // default until first poll
 if (currentIP) restartPolling();
 </script>
 </body>

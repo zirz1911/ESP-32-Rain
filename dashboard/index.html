@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 Rain Sensor Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+
+      --dry:       #3fb950;
+      --light:     #d29922;
+      --moderate:  #f0883e;
+      --heavy:     #f85149;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────────────── */
+    .container { max-width: 960px; margin: 0 auto; }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+
+    /* ── IP input bar ─────────────────────────────────────────────────────── */
+    .ip-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .ip-bar label {
+      font-size: 0.85rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .ip-bar input {
+      flex: 1;
+      min-width: 180px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .ip-bar input:focus { border-color: var(--accent); }
+    .ip-bar button {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .ip-bar button:hover { opacity: 0.85; }
+
+    /* ── Status strip ─────────────────────────────────────────────────────── */
+    .status-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+      font-size: 0.82rem;
+    }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .dot.connected    { background: var(--dry); box-shadow: 0 0 6px var(--dry); }
+    .dot.disconnected { background: var(--heavy); }
+    #conn-label { color: var(--muted); }
+
+    /* ── Grid ─────────────────────────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 580px) { .grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .card-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    /* ── Circular gauge ───────────────────────────────────────────────────── */
+    .gauge-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .gauge {
+      position: relative;
+      width: 140px; height: 140px;
+    }
+    .gauge svg {
+      transform: rotate(-90deg);
+      width: 140px; height: 140px;
+    }
+    .gauge circle {
+      fill: none;
+      stroke-width: 12;
+      stroke-linecap: round;
+    }
+    .gauge .track  { stroke: var(--border); }
+    .gauge .fill   {
+      stroke: var(--dry);
+      stroke-dasharray: 339.292;        /* 2π × r(54) */
+      stroke-dashoffset: 339.292;
+      transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease;
+    }
+    .gauge-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .gauge-pct {
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .gauge-unit { font-size: 0.75rem; color: var(--muted); }
+
+    /* ── Status badge ─────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 0.04em;
+      background: var(--border);
+      color: var(--text);
+      transition: background 0.4s, color 0.3s;
+    }
+    .badge.dry      { background: #1a3d24; color: var(--dry); }
+    .badge.light    { background: #3d2f0a; color: var(--light); }
+    .badge.moderate { background: #3d2209; color: var(--moderate); }
+    .badge.heavy    { background: #3d0c0a; color: var(--heavy); }
+
+    /* ── Stat rows ────────────────────────────────────────────────────────── */
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-key   { color: var(--muted); }
+    .stat-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    /* ── Chart card (full width) ──────────────────────────────────────────── */
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .chart-card canvas { max-height: 200px; }
+
+    /* ── Error box ────────────────────────────────────────────────────────── */
+    .error-box {
+      background: #2d0f0f;
+      border: 1px solid var(--heavy);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 0.85rem;
+      color: #ff8b8b;
+      margin-bottom: 20px;
+      display: none;
+      line-height: 1.6;
+    }
+    .error-box.visible { display: block; }
+
+    /* ── Uptime / IP chips ────────────────────────────────────────────────── */
+    .chip {
+      font-size: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      color: var(--muted);
+    }
+
+    /* ── Last-updated ─────────────────────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 24px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Rain Sensor Dashboard</h1>
+  <p class="subtitle">ESP32 — Real-time monitoring / ตรวจสอบเซ็นเซอร์ฝนแบบเรียลไทม์</p>
+
+  <!-- IP input -->
+  <div class="ip-bar">
+    <label for="ip-input">ESP32 IP Address:</label>
+    <input id="ip-input" type="text" placeholder="192.168.1.xxx" spellcheck="false" />
+    <button onclick="saveIP()">Connect</button>
+    <span class="chip" id="current-ip-chip">—</span>
+  </div>
+
+  <!-- Connection status -->
+  <div class="status-strip">
+    <div class="dot disconnected" id="conn-dot"></div>
+    <span id="conn-label">Not connected</span>
+  </div>
+
+  <!-- Error box -->
+  <div class="error-box" id="error-box">
+    <strong>Connection Error</strong><br/>
+    <span id="error-msg"></span><br/><br/>
+    <strong>Tips:</strong><br/>
+    1. Make sure ESP32 is powered and on the same network.<br/>
+    2. Check the IP address above.<br/>
+    3. If you see a <em>CORS error</em> in the browser console, the ESP32 firmware may be missing CORS headers.<br/>
+    4. Try opening <code id="error-url"></code> directly in a new tab.
+  </div>
+
+  <!-- Gauge + Badge grid -->
+  <div class="grid">
+
+    <!-- Circular gauge -->
+    <div class="card">
+      <div class="card-title">ความชื้น / Rain Level</div>
+      <div class="gauge-wrap">
+        <div class="gauge">
+          <svg viewBox="0 0 120 120">
+            <circle class="track" cx="60" cy="60" r="54"/>
+            <circle class="fill"  cx="60" cy="60" r="54" id="gauge-fill"/>
+          </svg>
+          <div class="gauge-label">
+            <span class="gauge-pct" id="gauge-pct">—</span>
+            <span class="gauge-unit">%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status + stats -->
+    <div class="card">
+      <div class="card-title">สถานะ / Status</div>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div>
+          <span class="badge" id="status-badge">—</span>
+        </div>
+        <div>
+          <div class="stat-row">
+            <span class="stat-key">Analog (raw)</span>
+            <span class="stat-value" id="stat-analog">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-key">Digital (DO)</span>
+            <span class="stat-value" id="stat-digital">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-key">ESP32 IP</span>
+            <span class="stat-value" id="stat-ip">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-key">Uptime</span>
+            <span class="stat-value" id="stat-uptime">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Line chart -->
+  <div class="chart-card">
+    <div class="card-title" style="margin-bottom:16px;">
+      Rain % — Last 60 readings / 60 ค่าล่าสุด
+    </div>
+    <canvas id="rain-chart"></canvas>
+  </div>
+
+  <div class="footer" id="last-updated">Waiting for first reading…</div>
+
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const POLL_MS    = 1000;
+const MAX_POINTS = 60;
+const CIRCUMF    = 2 * Math.PI * 54;   // SVG circle r=54
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentIP     = localStorage.getItem('esp32-ip') || '';
+let pollTimer     = null;
+let chartLabels   = [];
+let chartData     = [];
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const ipInput       = document.getElementById('ip-input');
+const currentIPChip = document.getElementById('current-ip-chip');
+const connDot       = document.getElementById('conn-dot');
+const connLabel     = document.getElementById('conn-label');
+const errorBox      = document.getElementById('error-box');
+const errorMsg      = document.getElementById('error-msg');
+const errorUrl      = document.getElementById('error-url');
+const gaugeFill     = document.getElementById('gauge-fill');
+const gaugePct      = document.getElementById('gauge-pct');
+const statusBadge   = document.getElementById('status-badge');
+const statAnalog    = document.getElementById('stat-analog');
+const statDigital   = document.getElementById('stat-digital');
+const statIP        = document.getElementById('stat-ip');
+const statUptime    = document.getElementById('stat-uptime');
+const lastUpdated   = document.getElementById('last-updated');
+
+// ── Chart setup ──────────────────────────────────────────────────────────────
+const ctx = document.getElementById('rain-chart').getContext('2d');
+const rainChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Rain %',
+      data: [],
+      borderColor: '#58a6ff',
+      backgroundColor: 'rgba(88,166,255,0.08)',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: true,
+    }]
+  },
+  options: {
+    animation: { duration: 300 },
+    responsive: true,
+    maintainAspectRatio: true,
+    scales: {
+      x: {
+        display: false,
+      },
+      y: {
+        min: 0, max: 100,
+        grid:  { color: '#30363d' },
+        ticks: { color: '#8b949e', callback: v => v + '%' }
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: { label: ctx => ctx.parsed.y + '%' }
+      }
+    }
+  }
+});
+
+// ── IP helpers ────────────────────────────────────────────────────────────────
+function saveIP() {
+  const val = ipInput.value.trim();
+  if (!val) return;
+  currentIP = val;
+  localStorage.setItem('esp32-ip', val);
+  currentIPChip.textContent = val;
+  restartPolling();
+}
+
+function loadSavedIP() {
+  if (currentIP) {
+    ipInput.value = currentIP;
+    currentIPChip.textContent = currentIP;
+  }
+}
+
+// ── Gauge update ──────────────────────────────────────────────────────────────
+function setGauge(pct) {
+  const offset = CIRCUMF - (pct / 100) * CIRCUMF;
+  gaugeFill.style.strokeDashoffset = offset;
+  gaugePct.textContent = pct;
+
+  let color = '#3fb950';
+  if      (pct >= 70) color = '#f85149';
+  else if (pct >= 40) color = '#f0883e';
+  else if (pct >= 10) color = '#d29922';
+  gaugeFill.style.stroke = color;
+  gaugePct.style.color   = color;
+}
+
+// ── Badge update ─────────────────────────────────────────────────────────────
+function setBadge(status) {
+  statusBadge.textContent = status;
+  statusBadge.className   = 'badge';
+  const s = status.toLowerCase();
+  if      (s.includes('dry'))    statusBadge.classList.add('dry');
+  else if (s.includes('light'))  statusBadge.classList.add('light');
+  else if (s.includes('moderate')) statusBadge.classList.add('moderate');
+  else if (s.includes('heavy'))  statusBadge.classList.add('heavy');
+}
+
+// ── Uptime formatter ─────────────────────────────────────────────────────────
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// ── Connection UI ─────────────────────────────────────────────────────────────
+function setConnected(ok, msg = '') {
+  connDot.className   = 'dot ' + (ok ? 'connected' : 'disconnected');
+  connLabel.textContent = ok ? 'Connected — polling every 1s' : 'Disconnected';
+  if (ok) {
+    errorBox.classList.remove('visible');
+  } else if (msg) {
+    errorBox.classList.add('visible');
+    errorMsg.textContent = msg;
+    const url = `http://${currentIP}/data`;
+    errorUrl.textContent = url;
+    errorUrl.setAttribute('href', url);
+  }
+}
+
+// ── Chart push ────────────────────────────────────────────────────────────────
+function pushChartPoint(pct) {
+  const now = new Date().toLocaleTimeString('th-TH', { hour12: false });
+  chartLabels.push(now);
+  chartData.push(pct);
+  if (chartLabels.length > MAX_POINTS) {
+    chartLabels.shift();
+    chartData.shift();
+  }
+  rainChart.data.labels   = [...chartLabels];
+  rainChart.data.datasets[0].data = [...chartData];
+  rainChart.update('none');   // skip animation for speed
+}
+
+// ── Fetch + render ────────────────────────────────────────────────────────────
+async function poll() {
+  if (!currentIP) return;
+
+  const url = `http://${currentIP}/data`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+
+    setConnected(true);
+    setGauge(d.rain_percent);
+    setBadge(d.status);
+    statAnalog.textContent  = d.analog_val;
+    statDigital.textContent = d.digital_val === 0 ? '0 (Rain detected)' : '1 (Dry)';
+    statIP.textContent      = d.ip;
+    statUptime.textContent  = formatUptime(d.uptime);
+    lastUpdated.textContent = 'Last updated: ' + new Date().toLocaleTimeString('th-TH', { hour12: false });
+    pushChartPoint(d.rain_percent);
+
+  } catch (err) {
+    setConnected(false, err.message || 'Fetch failed');
+    lastUpdated.textContent = 'Last updated: —  (connection lost)';
+  }
+}
+
+// ── Polling control ──────────────────────────────────────────────────────────
+function restartPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  poll();   // immediate first call
+  pollTimer = setInterval(poll, POLL_MS);
+}
+
+// ── Enter key in IP field ────────────────────────────────────────────────────
+ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveIP(); });
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+loadSavedIP();
+if (currentIP) restartPolling();
+</script>
+</body>
+</html>
